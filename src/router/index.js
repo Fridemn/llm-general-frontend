@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '@/views/HomeView.vue'
 import LoginOrRegister from '@/views/LoginOrRegister/index.vue'
+import Chat from '@/views/ChatView/index.vue'
 import test from '@/views/testView.vue'
 
 const router = createRouter({
@@ -26,6 +27,15 @@ const router = createRouter({
       meta: {
         requiresAuth: true, // 需要登录才能访问
         title: '测试页面'
+      }
+    },
+    {
+      path: '/chat',
+      name: 'Chat',
+      component: Chat,
+      meta: {
+        requiresAuth: true, // 需要登录才能访问
+        title: '聊天页面'
       }
     }
   ]
