@@ -249,6 +249,10 @@
 <script setup>
 import { ref, reactive, computed } from 'vue'
 import { validatePhone, validateEmail, validatePasswordMatch } from '@/utils/validators'
+import { getRegisterCode, register, passwordLogin } from '@/api'  // 添加 passwordLogin 导入
+import { useRouter } from 'vue-router'  // 添加路由
+
+const router = useRouter()
 
 const isLogin = ref(true)
 const isForgotPassword = ref(false)
@@ -341,7 +345,7 @@ const validateForm = () => {
   return true
 }
 
-const getVerificationCode = () => {
+const getVerificationCode = async () => {
   if (!form.phone) {
     alert('请先填写手机号')
     return
@@ -352,24 +356,49 @@ const getVerificationCode = () => {
     return
   }
 
-  // TODO: 调用发送验证码的API
-  console.log('发送验证码', { phone: form.phone })
-  
-  countdown.value = 60
-  const timer = setInterval(() => {
-    countdown.value--
-    if (countdown.value <= 0) {
-      clearInterval(timer)
-    }
-  }, 1000)
+  try {
+    const { request } = getRegisterCode(form.phone)
+    const res = await request
+    console.log('验证码发送响应:', res)
+    alert(res.message || '验证码发送成功')
+    
+    // 开始倒计时
+    countdown.value = 60
+    const timer = setInterval(() => {
+      countdown.value--
+      if (countdown.value <= 0) {
+        clearInterval(timer)
+      }
+    }, 1000)
+  } catch (error) {
+    alert(error.response?.data?.message || '验证码发送失败')
+    console.error('验证码发送失败:', error)
+  }
 }
 
-const handleSubmit = () => {
+const handleSubmit = async () => {
   if (!validateForm()) return
   
   if (isLogin.value && !isForgotPassword.value) {
     // 处理登录逻辑
-    console.log('登录表单', { phone: form.phone, password: form.password })
+    try {
+      const { request } = passwordLogin({
+        account: form.phone,  // 使用手机号作为账号
+        password: form.password
+      })
+      const res = await request
+      
+      // 保存 token 和用户信息
+      localStorage.setItem('token', res.data.token)
+      localStorage.setItem('userInfo', JSON.stringify(res.data.user))
+      
+      alert(res.message || '登录成功')
+      // 登录成功后跳转到首页或其他页面
+      router.push('/test')
+    } catch (error) {
+      alert(error.response?.data?.message || '登录失败')
+      console.error('登录失败:', error)
+    }
   } else if (isForgotPassword.value) {
     // 处理重置密码逻辑
     console.log('重置密码表单', { 
@@ -379,7 +408,22 @@ const handleSubmit = () => {
     })
   } else {
     // 处理注册逻辑
-    console.log('注册表单', form)
+    try {
+      const { request } = register({
+        username: form.username,
+        phone: form.phone,
+        password: form.password,
+        code: form.verificationCode
+      })
+      const res = await request
+      alert(res.message || '注册成功')
+      // 注册成功后切换到登录页
+      isLogin.value = true
+      resetForm()
+    } catch (error) {
+      alert(error.response?.data?.message || '注册失败')
+      console.error('注册失败:', error)
+    }
   }
 }
 </script>
