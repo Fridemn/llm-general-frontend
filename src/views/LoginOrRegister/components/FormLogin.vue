@@ -64,6 +64,9 @@
 import { reactive, ref } from 'vue'
 import { validatePhone } from '@/utils/validators'
 import { passwordLogin } from '@/api'
+import { useUserStore } from '@/store/user'
+
+const userStore = useUserStore()
 
 const emit = defineEmits(['toggleForgot', 'toggleForm', 'loginSuccess'])
 
@@ -82,13 +85,13 @@ const handleSubmit = async () => {
 
   try {
     const { request } = passwordLogin({
-      account: form.phone,
+      phone: form.phone,
       password: form.password
     })
     const res = await request
     
-    localStorage.setItem('token', res.data.token)
-    localStorage.setItem('userInfo', JSON.stringify(res.data.user))
+    userStore.setToken(res.data.token)
+    userStore.setUserInfo(res.data.user)
     
     alert(res.message || '登录成功')
     emit('loginSuccess')

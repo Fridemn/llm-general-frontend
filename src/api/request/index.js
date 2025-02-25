@@ -1,41 +1,34 @@
 import axios from 'axios'
+import { useUserStore } from '@/store/user'
 
 const request = axios.create({
   baseURL: import.meta.env.VITE_BASE_API,
-  timeout: 600000,
-  headers: {
-    'Content-Type': 'application/json'
-  }
+  timeout: 10000
 })
 
-// 请求拦截器
 request.interceptors.request.use(
-    config => {
-      const token = localStorage.getItem('token')
-      if (token) {
-        config.headers['Authorization'] = `Bearer ${token}`
-      }
-      return config
-    },
-    error => {
-      return Promise.reject(error)
+  config => {
+    const userStore = useUserStore()
+    if (userStore.token) {
+      config.headers.Authorization = `Bearer ${userStore.token}`
     }
-  )
-
-// 响应拦截器
-request.interceptors.response.use(
-  response => {
-    const res = response.data
-    if (res.code && res.code !== 200) {
-      console.error(res.message || '错误')
-      return Promise.reject(new Error(res.message || '错误'))
-    }
-    return res
+    return config
   },
   error => {
-    console.error('请求错误:', error)
-    const errorMsg = error.response?.data?.message || '网络错误'
-    console.error(errorMsg)
+    return Promise.reject(error)
+  }
+)
+
+request.interceptors.response.use(
+  response => {
+    return response.data
+  },
+  error => {
+    if (error.response?.status === 401) {
+      const userStore = useUserStore()
+      userStore.clearUserInfo()
+      window.location.href = '/login'
+    }
     return Promise.reject(error)
   }
 )

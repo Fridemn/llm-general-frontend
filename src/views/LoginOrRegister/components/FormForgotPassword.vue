@@ -34,7 +34,7 @@
 <script setup>
 import { reactive, ref } from 'vue'
 import { validatePhone, validatePasswordMatch } from '@/utils/validators'
-import { getResetCode, resetPassword } from '@/api'
+import { getResetCode, resetInfo } from '@/api/modules/user'
 import VerificationInput from './InputVerification.vue'
 import PasswordInput from './InputPassword.vue'
 
@@ -84,9 +84,9 @@ const handleSubmit = async () => {
   }
 
   try {
-    const { request } = resetPassword({
+    const { request } = resetInfo({
       phone: form.phone,
-      code: form.verificationCode,
+      verification_code: form.verificationCode,
       new_password: form.newPassword
     })
     const res = await request

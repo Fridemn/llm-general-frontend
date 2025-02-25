@@ -11,13 +11,28 @@ export const getRegisterCode = (phone) => {
   const source = addCancelToken(config)
   
   return {
-    request: request.get('/user/register_code', config),
+    request: request.get('/user/register/verification-code/send', config),
     source
   }
 }
 
 /**
- * 获取重置密码验证码
+ * 获取登录验证码
+ * @param {string} phone - 手机号码
+ * @returns {object} 包含请求promise和取消令牌的对象
+ */
+export const getLoginCode = (phone) => {
+  const config = { params: { phone } }
+  const source = addCancelToken(config)
+  
+  return {
+    request: request.get('/user/login/verification-code/send', config),
+    source
+  }
+}
+
+/**
+ * 获取重置验证码
  * @param {string} phone - 手机号码
  * @returns {object} 包含请求promise和取消令牌的对象
  */
@@ -26,7 +41,7 @@ export const getResetCode = (phone) => {
   const source = addCancelToken(config)
   
   return {
-    request: request.get('/user/reset_code', config),
+    request: request.get('/user/reset/verification-code/send', config),
     source
   }
 }
@@ -34,10 +49,10 @@ export const getResetCode = (phone) => {
 /**
  * 用户注册
  * @param {Object} data - 注册信息
- * @param {string} data.username - 用户名
+ * @param {string} [data.username] - 用户名（可选）
  * @param {string} data.phone - 手机号
  * @param {string} data.password - 密码
- * @param {string} data.code - 验证码
+ * @param {string} [data.verification_code] - 验证码（可选）
  * @param {string} [data.invitation_code] - 邀请码（可选）
  * @returns {object} 包含请求promise和取消令牌的对象
  */
@@ -50,7 +65,7 @@ export const register = (data) => {
   const source = addCancelToken(config)
   
   return {
-    request: request.post('/user/register', data, config),
+    request: request.post('/user/register/verification-code-way', data, config),
     source
   }
 }
@@ -58,7 +73,7 @@ export const register = (data) => {
 /**
  * 密码登录
  * @param {Object} data - 登录信息
- * @param {string} data.account - 账号（手机号）
+ * @param {string} data.phone - 手机号
  * @param {string} data.password - 密码
  * @returns {object} 包含请求promise和取消令牌的对象
  */
@@ -71,20 +86,19 @@ export const passwordLogin = (data) => {
   const source = addCancelToken(config)
   
   return {
-    request: request.post('/user/password_login', data, config),
+    request: request.post('/user/login/password-way', data, config),
     source
   }
 }
 
 /**
- * 重置密码
- * @param {Object} data - 重置信息
+ * 验证码登录
+ * @param {Object} data - 登录信息
  * @param {string} data.phone - 手机号
- * @param {string} data.code - 验证码
- * @param {string} data.new_password - 新密码
+ * @param {string} data.verification_code - 验证码
  * @returns {object} 包含请求promise和取消令牌的对象
  */
-export const resetPassword = (data) => {
+export const codeLogin = (data) => {
   const config = {
     headers: {
       'Content-Type': 'application/json'
@@ -93,43 +107,78 @@ export const resetPassword = (data) => {
   const source = addCancelToken(config)
   
   return {
-    request: request.post('/user/reset_password', data, config),
+    request: request.post('/user/login/verification-code-way', data, config),
+    source
+  }
+}
+
+/**
+ * 重置信息
+ * @param {Object} data - 重置信息
+ * @param {string} [data.username] - 用户名（可选）
+ * @param {string} data.phone - 手机号
+ * @param {string} data.old_password - 旧密码
+ * @param {string} data.new_password - 新密码
+ * @param {string} data.verification_code - 验证码
+ * @param {string} [data.account] - 账号（可选）
+ * @param {string} [data.invitation_code] - 邀请码（可选）
+ * @returns {object} 包含请求promise和取消令牌的对象
+ */
+export const resetInfo = (data) => {
+  const config = {
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  }
+  const source = addCancelToken(config)
+  
+  return {
+    request: request.post('/user/reset/info/verification-code-way', data, config),
+    source
+  }
+}
+
+/**
+ * 退出登录
+ * @param {string} token - 用户token
+ * @returns {object} 包含请求promise和取消令牌的对象
+ */
+export const logout = (token) => {
+  const config = { params: { token } }
+  const source = addCancelToken(config)
+  
+  return {
+    request: request.post('/user/logout', null, config),
     source
   }
 }
 
 /**
  * 获取用户信息
+ * @param {string} token - 用户token
  * @returns {object} 包含请求promise和取消令牌的对象
  */
-export const getUserInfo = () => {
-  const config = {}
+export const getUserInfo = (token) => {
+  const config = { params: { token } }
   const source = addCancelToken(config)
   
   return {
-    request: request.get('/user/info', config),
+    request: request.get('/user/profile', config),
     source
   }
 }
 
 /**
- * 更新用户信息
- * @param {Object} data - 用户信息
- * @param {string} data.username - 用户名
- * @param {string} data.phone - 手机号
- * @param {string} data.email - 邮箱
+ * 获取所有用户
+ * @param {string} token - 用户token
  * @returns {object} 包含请求promise和取消令牌的对象
  */
-export const updateUserInfo = (data) => {
-  const config = {
-    headers: {
-      'Content-Type': 'application/json'
-    }
-  }
+export const getAllUsers = (token) => {
+  const config = { params: { token } }
   const source = addCancelToken(config)
   
   return {
-    request: request.put('/user/info', data, config),
+    request: request.get('/user/all-users', config),
     source
   }
 }
