@@ -16,7 +16,7 @@
     <div class="mt-auto">
       <div class="flex items-center p-2 text-gray-600">
         <span class="material-icons mr-2">account_circle</span>
-        {{ userInfo.username }}
+        {{ userStore.userInfo.username || '未登录' }}
       </div>
     </div>
   </nav>
@@ -25,9 +25,10 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { useUserStore } from '@/store/user'
 
 const route = useRoute()
-const userInfo = ref(JSON.parse(localStorage.getItem('userInfo') || '{}'))
+const userStore = useUserStore()
 
 const navItems = [
   { name: '聊天', path: '/chat', icon: 'chat' },

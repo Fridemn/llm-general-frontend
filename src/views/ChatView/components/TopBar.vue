@@ -47,7 +47,7 @@ const localModel = ref(props.selectedModel)
 const quota = ref(100)
 
 const models = [
-  { id: 'gpt-3.5', name: 'GPT-3.5' },
+  { id: 'gpt-3.5-turbo', name: 'GPT-3.5' },
   { id: 'gpt-4', name: 'GPT-4' },
   { id: 'claude', name: 'Claude' }
 ]
