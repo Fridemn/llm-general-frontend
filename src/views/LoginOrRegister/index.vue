@@ -48,6 +48,6 @@ const toggleForgotPassword = () => {
 }
 
 const handleLoginSuccess = () => {
-  router.push('/test')
+  router.push('/chat')
 }
 </script>

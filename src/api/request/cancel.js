@@ -1,4 +1,3 @@
-// api/request/cancel.js
 import axios from 'axios'
 
 export const addCancelToken = config => {
