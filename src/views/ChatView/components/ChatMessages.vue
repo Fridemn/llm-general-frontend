@@ -4,8 +4,7 @@
       <div class="loader"></div>
     </div>
     <div v-else-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-gray-500 py-10">
-      <span class="material-icons text-4xl mb-4">chat_bubble_outline</span>
-      <p>开始一个新对话吧</p>
+      <span class="material-icons text-4xl mb-4">开始一个新对话吧</span>
     </div>
     <template v-else>
       <div 
@@ -25,7 +24,7 @@
           }"
         >
           <div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center mr-2">
-            <span v-if="isAssistant(message)" class="material-icons text-sm text-indigo-600">smart_toy</span>
+            <span v-if="isAssistant(message)" class="material-icons text-sm text-indigo-600">AI</span>
             <span v-else class="material-icons text-sm text-gray-500">info</span>
           </div>
           <div>
@@ -46,7 +45,7 @@
           class="message-wrapper flex max-w-[80%] flex-row-reverse"
         >
           <div class="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center ml-2">
-            <span class="material-icons text-sm text-blue-600">person</span>
+            <span class="material-icons text-sm text-blue-600">You</span>
           </div>
           <div class="flex flex-col items-end">
             <div class="text-xs text-gray-500 mb-1 mr-1">
@@ -95,14 +94,12 @@ const isStreamingResponse = computed(() => props.isStreaming);
 // 滚动到最新消息
 watch(() => props.messages.length, async () => {
   await nextTick();
-  scrollToBottom();
 }, { immediate: true });
 
 // 监听流式消息的变化，确保滚动到底部
 watch(() => props.isStreaming, async (newVal) => {
   if (newVal) {
     await nextTick();
-    scrollToBottom();
   }
 });
 
@@ -110,16 +107,9 @@ watch(() => props.isStreaming, async (newVal) => {
 watch(() => props.messages, async () => {
   if (props.isStreaming) {
     await nextTick();
-    scrollToBottom();
   }
 }, { deep: true });
 
-const scrollToBottom = () => {
-  if (messageElements.value?.length > 0) {
-    const lastMessage = messageElements.value[messageElements.value.length - 1];
-    lastMessage?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }
-};
 
 // 将消息格式化为一致的结构
 const formattedMessages = computed(() => {

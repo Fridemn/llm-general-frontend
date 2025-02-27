@@ -16,18 +16,6 @@
         </option>
       </select>
     </div>
-
-    <div class="ml-auto flex items-center space-x-4">
-      <div class="text-sm text-gray-600">
-        剩余配额：{{ quota }} 次
-      </div>
-      <button
-        @click="handleBuyQuota"
-        class="px-4 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
-      >
-        购买配额
-      </button>
-    </div>
   </div>
 </template>
 
@@ -52,7 +40,4 @@ const models = [
   { id: 'claude', name: 'Claude' }
 ]
 
-const handleBuyQuota = () => {
-  // 处理购买配额逻辑
-}
 </script>
