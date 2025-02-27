@@ -84,7 +84,7 @@ onBeforeUnmount(() => {
 })
 
 // 获取聊天历史
-const fetchChatHistories = async () => {
+const fetchChatHistories = async (isAfterNewMessage = false) => {
   if (!userStore.token) return
 
   loadingHistories.value = true
@@ -92,43 +92,49 @@ const fetchChatHistories = async () => {
     const { request, source } = getUserHistories(userStore.token)
     const response = await request
     
-    console.log('API响应:', response)
+    console.log('获取历史会话列表:', response)
     
-    // 更健壮的数据处理 - 注意response已经是axios拦截器提取的response.data
+    // 处理响应数据
+    let histories = [];
     if (response) {
-      // 检查不同可能的数据结构
       if (Array.isArray(response)) {
-        // 如果直接返回数组
-        conversations.value = response
+        histories = response;
       } else if (response.histories) {
-        // 如果返回对象中包含histories数组
-        conversations.value = response.histories
+        histories = response.histories;
       } else {
-        // 如果是其他结构，尝试处理
-        conversations.value = Array.isArray(response) ? response : [response]
-        console.warn('API返回了意外的数据结构:', response)
+        histories = Array.isArray(response) ? response : [response];
       }
-    } else {
-      conversations.value = []
-      console.warn('API响应为空')
     }
     
-    // 如果有历史记录，默认选择第一个
-    if (conversations.value.length > 0 && !activeChat.value) {
-      handleSelectChat(conversations.value[0].history_id || conversations.value[0].id)
+    // 保存会话列表
+    conversations.value = histories;
+    
+    // 如果是新消息发送后的请求，且当前无activeChat，则选择最新的会话
+    if (isAfterNewMessage && !activeChat.value && histories.length > 0) {
+      // 按更新时间排序，选择最新的
+      const sortedHistories = [...histories].sort((a, b) => {
+        const timeA = new Date(a.update_time || a.create_time || 0);
+        const timeB = new Date(b.update_time || b.create_time || 0);
+        return timeB - timeA; // 降序，最新的在前
+      });
+      
+      if (sortedHistories.length > 0) {
+        const newHistoryId = sortedHistories[0].history_id || sortedHistories[0].id;
+        console.log('新消息后，选择最新会话:', newHistoryId);
+        activeChat.value = newHistoryId;
+      }
+    }
+    // 普通加载，如果无activeChat则选择第一个会话
+    else if (!activeChat.value && histories.length > 0) {
+      handleSelectChat(histories[0].history_id || histories[0].id);
     }
   } catch (error) {
-    console.error('获取聊天历史失败:', error)
-    console.error('错误详情:', {
-      message: error.message,
-      stack: error.stack,
-      response: error.response
-    })
-    conversations.value = []
+    console.error('获取聊天历史失败:', error);
+    conversations.value = [];
   } finally {
-    loadingHistories.value = false
+    loadingHistories.value = false;
   }
-}
+};
 
 const handleModelChange = (model) => {
   selectedModel.value = model
@@ -232,6 +238,9 @@ const handleSendMessage = async (content) => {
   // 终止正在进行的流请求
   abortStreamIfActive()
   
+  // 记录是否是新会话
+  const isNewChat = !activeChat.value
+  
   // 添加用户消息 - 使用与API一致的格式
   const userMessage = {
     sender: { role: 'user' },
@@ -297,15 +306,13 @@ const handleSendMessage = async (content) => {
     const reader = response.body.getReader()
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
-    let tokenInfo = {}
-    let messageId = null
-    let historyId = null
     
     try {
       while (true) {
         const { done, value } = await reader.read()
         
         if (done) {
+          console.log('流式请求完成')
           break
         }
         
@@ -365,15 +372,13 @@ const handleSendMessage = async (content) => {
       }
     }
     
-    // 完成流式响应后，更新消息对象
-    if (messageId) {
-      aiMessage.message_id = messageId
-    }
-    
-    // 如果是新对话，需要更新activeChat
-    if (!activeChat.value && historyId) {
-      activeChat.value = historyId
-      fetchChatHistories()
+    // 流式请求完成后，如果是新会话，则获取最新的会话列表
+    if (isNewChat) {
+      console.log('新会话消息已发送，获取最新会话列表')
+      // 延迟执行，确保后端处理完成
+      setTimeout(() => {
+        fetchChatHistories(true)
+      }, 1000)
     }
     
   } catch (error) {
