@@ -47,9 +47,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useUserStore } from '@/store/user'
-import { getUserHistories, getHistory, chat, chatStream, deleteHistory } from '@/api/modules/llm'
+import { 
+  getUserHistories, 
+  getHistory, 
+  chat, 
+  chatStream, 
+  deleteHistory, 
+  summarizeHistoryTitle 
+} from '@/api/modules/llm'
 import SideNav from './components/SideNav.vue'
 import TopBar from './components/TopBar.vue'
 import ChatHistory from './components/ChatHistory.vue'
@@ -65,6 +72,10 @@ const loadingHistories = ref(false)
 const loadingMessages = ref(false)
 const isStreamingResponse = ref(false)
 const streamController = ref(null)
+// 记录上次总结标题时的消息数量
+const lastSummarizedCount = ref(0)
+// 记录当前会话的消息数量
+const currentMessageCount = ref(0)
 
 // 终止正在进行的流式请求
 const abortStreamIfActive = () => {
@@ -182,6 +193,11 @@ const handleSelectChat = async (chatId) => {
       console.warn('获取聊天记录返回了意外的数据格式:', response)
       currentMessages.value = []
     }
+    
+    // 重置总结计数器
+    lastSummarizedCount.value = currentMessages.value.length > 6 ? 6 : 0
+    currentMessageCount.value = currentMessages.value.length
+    
   } catch (error) {
     console.error('加载聊天记录失败:', error)
     currentMessages.value = [{
@@ -379,6 +395,19 @@ const handleSendMessage = async (content) => {
       setTimeout(() => {
         fetchChatHistories(true)
       }, 1000)
+    } else {
+      // 如果不是新会话，检查是否需要自动总结标题
+      // 当前消息数量（用户消息+AI回复）
+      const newMsgCount = currentMessages.value.length
+      
+      // 如果消息数量为偶数（表示一问一答完成）且不超过6条
+      if (newMsgCount <= 6 && newMsgCount % 2 === 0 && newMsgCount > lastSummarizedCount.value) {
+        console.log(`消息数为${newMsgCount}，尝试自动总结标题`)
+        // 延迟执行，确保消息已写入数据库
+        setTimeout(() => {
+          sumTitleIfNeeded(activeChat.value)
+        }, 1000)
+      }
     }
     
   } catch (error) {
@@ -396,6 +425,67 @@ const handleSendMessage = async (content) => {
   } finally {
     isStreamingResponse.value = false
     streamController.value = null
+  }
+}
+
+// 监听消息数变化，触发标题总结
+watch(() => currentMessages.value.length, (newCount, oldCount) => {
+  // 当消息数量增加，且不在流式输出中，且有活跃会话时
+  if (newCount > oldCount && !isStreamingResponse.value && activeChat.value) {
+    currentMessageCount.value = newCount
+    
+    // 如果是偶数（一问一答完成）且不超过6条且大于上次总结的消息数
+    if (newCount <= 6 && newCount % 2 === 0 && newCount > lastSummarizedCount.value) {
+      // 延迟执行，确保消息已保存
+      setTimeout(() => {
+        sumTitleIfNeeded(activeChat.value)
+      }, 1000)
+    }
+  }
+})
+
+/**
+ * 自动总结标题
+ * 规则：当消息数量为2、4、6时调用API总结标题
+ */
+const sumTitleIfNeeded = async (historyId) => {
+  // 获取当前消息数量
+  const msgCount = currentMessages.value.length
+  
+  // 只在消息数为2、4、6且大于上次总结时的数量时才总结
+  if (!historyId || msgCount > 6 || msgCount % 2 !== 0 || msgCount <= lastSummarizedCount.value) {
+    return false
+  }
+  
+  console.log(`消息数量为${msgCount}条，开始总结标题`)
+  
+  try {
+    // 调用总结API
+    const { request } = summarizeHistoryTitle(historyId, userStore.token)
+    const response = await request
+    
+    console.log('标题总结结果:', response)
+    
+    // 更新上次总结的消息数量
+    lastSummarizedCount.value = msgCount
+    
+    // 如果API返回了新标题，更新本地会话列表
+    if (response && response.title) {
+      const chatIndex = conversations.value.findIndex(c => 
+        (c.history_id || c.id) === historyId
+      )
+      
+      if (chatIndex !== -1) {
+        conversations.value[chatIndex].title = response.title
+        // 强制Vue更新视图
+        conversations.value = [...conversations.value]
+        return true
+      }
+    }
+    return false
+  } catch (error) {
+    console.error('自动总结标题失败:', error)
+    return false
   }
 }
 </script>
