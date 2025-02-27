@@ -1,19 +1,20 @@
 <template>
-  <div class="flex h-screen bg-gray-100">
+  <div class="flex h-screen bg-gray-50">
     <!-- 侧边栏 -->
-    <SideNav class="w-64 bg-white shadow-md" />
+    <SideNav class="w-64 bg-white shadow-sm" />
 
     <div class="flex-1 flex flex-col">
       <!-- 顶部栏 -->
       <TopBar 
         :selectedModel="selectedModel"
         @model-change="handleModelChange"
+        class="border-b"
       />
 
-      <div class="flex-1 flex">
+      <div class="flex-1 flex overflow-hidden">
         <!-- 聊天历史列表 -->
         <ChatHistory 
-          class="w-64 bg-white shadow-md"
+          class="w-64 bg-white border-r"
           :conversations="conversations"
           :activeChat="activeChat"
           :loading="loadingHistories"
@@ -23,18 +24,19 @@
         />
 
         <!-- 主聊天区域 -->
-        <div class="flex-1 flex flex-col">
+        <div class="flex-1 flex flex-col bg-white">
           <!-- 聊天消息列表 -->
-          <ChatMessages 
-            class="flex-1 overflow-y-auto p-4"
-            :messages="currentMessages"
-            :loading="loadingMessages"
-            :isStreaming="isStreamingResponse"
-          />
+          <div class="flex-1 overflow-y-auto conversation-container">
+            <ChatMessages 
+              :messages="currentMessages"
+              :loading="loadingMessages"
+              :isStreaming="isStreamingResponse"
+            />
+          </div>
 
           <!-- 输入区域 -->
           <ChatInput 
-            class="p-4 bg-white shadow-t"
+            class="border-t"
             @send-message="handleSendMessage"
             :disabled="isStreamingResponse"
           />
@@ -146,11 +148,30 @@ const handleSelectChat = async (chatId) => {
     
     // 检查API返回的消息格式
     if (response && response.messages) {
-      // 直接使用API返回的消息数组
-      currentMessages.value = response.messages
+      // 处理消息内容，确保格式一致
+      currentMessages.value = response.messages.map(msg => {
+        // 确保每条消息有正确的格式
+        return {
+          ...msg,
+          // 如果message_str为空但components不为空，从components中提取内容
+          message_str: msg.message_str || (msg.components && msg.components.length > 0 
+            ? msg.components.map(comp => comp.content).join('\n') 
+            : ''),
+          // 保存原始components以备用
+          components: msg.components || []
+        }
+      })
     } else if (Array.isArray(response)) {
       // 如果直接返回了消息数组
-      currentMessages.value = response
+      currentMessages.value = response.map(msg => {
+        return {
+          ...msg,
+          message_str: msg.message_str || (msg.components && msg.components.length > 0 
+            ? msg.components.map(comp => comp.content).join('\n') 
+            : ''),
+          components: msg.components || []
+        }
+      })
     } else {
       console.warn('获取聊天记录返回了意外的数据格式:', response)
       currentMessages.value = []
@@ -373,3 +394,22 @@ const handleSendMessage = async (content) => {
   }
 }
 </script>
+
+<style>
+.conversation-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.conversation-container::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.conversation-container::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 3px;
+}
+
+.conversation-container::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
+</style>

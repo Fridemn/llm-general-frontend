@@ -1,41 +1,70 @@
 <template>
-  <div class="flex flex-col space-y-4">
-    <div v-if="loading" class="flex justify-center items-center py-4">
+  <div class="flex flex-col space-y-4 py-4 px-2">
+    <div v-if="loading" class="flex justify-center items-center py-6">
       <div class="loader"></div>
     </div>
-    <div v-else-if="messages.length === 0" class="text-center text-gray-500 py-10">
+    <div v-else-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-gray-500 py-10">
+      <span class="material-icons text-4xl mb-4">chat_bubble_outline</span>
       <p>开始一个新对话吧</p>
     </div>
     <template v-else>
       <div 
         v-for="(message, index) in formattedMessages" 
         :key="message.message_id || index"
-        class="message-item"
+        class="message-container"
         :class="{
-          'message-user': isUser(message),
-          'message-assistant': isAssistant(message),
-          'message-system': isSystem(message)
+          'justify-end': isUser(message)
         }"
         ref="messageElements"
       >
-        <div class="flex items-start">
-          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mr-3">
-            <span v-if="isUser(message)" class="material-icons text-blue-500">person</span>
-            <span v-else-if="isAssistant(message)" class="material-icons text-green-500">smart_toy</span>
-            <span v-else class="material-icons text-gray-500">info</span>
+        <!-- AI消息 左侧 -->
+        <div v-if="!isUser(message)" 
+          class="message-wrapper flex max-w-[80%]"
+          :class="{
+            'opacity-70': isStreamingResponse && index !== messages.length - 1
+          }"
+        >
+          <div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center mr-2">
+            <span v-if="isAssistant(message)" class="material-icons text-sm text-indigo-600">smart_toy</span>
+            <span v-else class="material-icons text-sm text-gray-500">info</span>
           </div>
-          <div class="flex-1">
-            <div class="text-sm text-gray-500 mb-1">
+          <div>
+            <div class="text-xs text-gray-500 mb-1 ml-1">
               {{ getSenderName(message) }}
             </div>
             <ChatMessageContent 
               :content="getMessageContent(message)"
-              :isUser="isUser(message)"
+              :isUser="false"
               :isError="isError(message)"
               :isStreaming="isStreaming && index === messages.length - 1 && isAssistant(message)"
             />
           </div>
         </div>
+
+        <!-- 用户消息 右侧 -->
+        <div v-else 
+          class="message-wrapper flex max-w-[80%] flex-row-reverse"
+        >
+          <div class="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center ml-2">
+            <span class="material-icons text-sm text-blue-600">person</span>
+          </div>
+          <div class="flex flex-col items-end">
+            <div class="text-xs text-gray-500 mb-1 mr-1">
+              {{ getSenderName(message) }}
+            </div>
+            <ChatMessageContent 
+              :content="getMessageContent(message)"
+              :isUser="true"
+              :isError="isError(message)"
+              :isStreaming="false"
+            />
+          </div>
+        </div>
+      </div>
+      
+      <!-- 打字指示器，仅在流式加载时显示 -->
+      <div v-if="isStreaming && messages.length > 0 && isAssistant(messages[messages.length-1])" 
+          class="message-container typing-indicator-container">
       </div>
     </template>
   </div>
@@ -61,33 +90,55 @@ const props = defineProps({
 });
 
 const messageElements = ref([]);
+const isStreamingResponse = computed(() => props.isStreaming);
 
 // 滚动到最新消息
 watch(() => props.messages.length, async () => {
   await nextTick();
-  if (messageElements.value?.length > 0) {
-    const lastMessage = messageElements.value[messageElements.value.length - 1];
-    lastMessage?.scrollIntoView({ behavior: 'smooth' });
-  }
+  scrollToBottom();
 }, { immediate: true });
 
 // 监听流式消息的变化，确保滚动到底部
 watch(() => props.isStreaming, async (newVal) => {
   if (newVal) {
     await nextTick();
-    if (messageElements.value?.length > 0) {
-      const lastMessage = messageElements.value[messageElements.value.length - 1];
-      lastMessage?.scrollIntoView({ behavior: 'smooth' });
-    }
+    scrollToBottom();
   }
 });
+
+// 监听消息内容变化，在流式输出时保持滚动
+watch(() => props.messages, async () => {
+  if (props.isStreaming) {
+    await nextTick();
+    scrollToBottom();
+  }
+}, { deep: true });
+
+const scrollToBottom = () => {
+  if (messageElements.value?.length > 0) {
+    const lastMessage = messageElements.value[messageElements.value.length - 1];
+    lastMessage?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+};
 
 // 将消息格式化为一致的结构
 const formattedMessages = computed(() => {
   return props.messages.map(msg => {
-    // 处理API返回的标准消息格式
-    if (msg.sender && (msg.components || msg.message_str)) {
-      return msg;
+    // 如果已经是标准格式但可能缺少某些字段，补全它们
+    if (msg.sender) {
+      return {
+        ...msg,
+        message_id: msg.message_id || msg.id || Date.now().toString(),
+        components: msg.components || [{
+          type: 'text',
+          content: msg.message_str || msg.streamContent || msg.content || ''
+        }],
+        message_str: msg.message_str || msg.streamContent || 
+                    (msg.components && msg.components.length > 0 
+                      ? msg.components.map(comp => comp.content).join('\n') 
+                      : msg.content || ''),
+        timestamp: msg.timestamp || Date.now()
+      };
     }
     
     // 处理前端临时创建的消息格式
@@ -110,6 +161,27 @@ const formattedMessages = computed(() => {
     };
   });
 });
+
+// 获取消息内容的函数，优先级：streamContent > message_str > components > content
+const getMessageContent = (message) => {
+  // 优先使用流式内容
+  if (message.streamContent !== undefined && message.streamContent !== null) {
+    return message.streamContent;
+  }
+  
+  // 其次使用message_str
+  if (message.message_str) {
+    return message.message_str;
+  }
+  
+  // 再次尝试从components中提取
+  if (message.components && message.components.length > 0) {
+    return message.components.map(comp => comp.content).join('\n');
+  }
+  
+  // 最后尝试使用content属性
+  return message.content || '';
+};
 
 const isUser = (message) => {
   return message.sender?.role === 'user';
@@ -136,43 +208,22 @@ const getSenderName = (message) => {
   }
   return '系统消息';
 };
-
-const getMessageContent = (message) => {
-  // 优先使用流式内容
-  if (message.streamContent !== undefined) {
-    return message.streamContent;
-  }
-  
-  if (message.message_str) {
-    return message.message_str;
-  }
-  if (message.components && message.components.length > 0) {
-    return message.components.map(comp => comp.content).join('\n');
-  }
-  return message.content || '';
-};
 </script>
 
 <style scoped>
-.message-item {
-  margin-bottom: 1.5rem;
+.message-container {
+  display: flex;
+  margin-bottom: 1rem;
+  width: 100%;
 }
 
-.message-user .message-content {
-  background-color: #e3f2fd;
-}
-
-.message-assistant .message-content {
-  background-color: #f1f5f9;
-}
-
-.message-system .message-content {
-  background-color: #fef9c3;
+.message-wrapper {
+  transition: opacity 0.2s ease;
 }
 
 .loader {
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #3498db;
+  border: 2px solid rgba(79, 70, 229, 0.2);
+  border-top: 2px solid #4f46e5;
   border-radius: 50%;
   width: 24px;
   height: 24px;
@@ -182,5 +233,9 @@ const getMessageContent = (message) => {
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+.typing-indicator-container {
+  height: 24px;
 }
 </style>
