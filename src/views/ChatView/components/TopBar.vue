@@ -37,7 +37,8 @@ const quota = ref(100)
 const models = [
   { id: 'gpt-3.5-turbo', name: 'GPT-3.5' },
   { id: 'gpt-4', name: 'GPT-4' },
-  { id: 'claude', name: 'Claude' }
+  { id: 'claude', name: 'Claude' },
+  { id: 'huihui_ai/deepseek-r1-abliterated:7b', name: 'DSR1-7B' }
 ]
 
 </script>
