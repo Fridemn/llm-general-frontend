@@ -38,7 +38,8 @@ const models = [
   { id: 'gpt-3.5-turbo', name: 'GPT-3.5' },
   { id: 'gpt-4', name: 'GPT-4' },
   { id: 'claude', name: 'Claude' },
-  { id: 'huihui_ai/deepseek-r1-abliterated:7b', name: 'DSR1-7B' }
+  { id: 'huihui_ai/deepseek-r1-abliterated:7b', name: 'DSR1-7B' },
+  { id: 'huihui_ai/qwen2.5-1m-abliterated:7b', name: 'qwen2.5-7B'}
 ]
 
 </script>
