@@ -1,7 +1,20 @@
 <template>
   <div class="flex h-screen bg-gray-50">
     <!-- 侧边栏 -->
-    <SideNav class="w-64 bg-white shadow-sm" />
+    <div class="relative" :class="sideNavCollapsed ? 'w-14' : 'w-64'">
+      <SideNav 
+        class="bg-white shadow-sm h-full transition-all duration-300"
+        :collapsed="sideNavCollapsed"
+      />
+      <button 
+        @click="toggleSideNav" 
+        class="absolute top-4 right-0 transform translate-x-1/2 bg-white rounded-full p-1 shadow-md hover:bg-gray-100 z-10"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" :class="{'rotate-180': sideNavCollapsed}" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+        </svg>
+      </button>
+    </div>
 
     <div class="flex-1 flex flex-col">
       <!-- 顶部栏 -->
@@ -13,15 +26,26 @@
 
       <div class="flex-1 flex overflow-hidden">
         <!-- 聊天历史列表 -->
-        <ChatHistory 
-          class="w-64 bg-white border-r"
-          :conversations="conversations"
-          :activeChat="activeChat"
-          :loading="loadingHistories"
-          @select-chat="handleSelectChat"
-          @new-chat="handleNewChat"
-          @delete-chat="handleDeleteChat"
-        />
+        <div class="relative transition-all duration-300" :class="chatHistoryCollapsed ? 'w-14' : 'w-64'">
+          <ChatHistory 
+            class="bg-white border-r h-full"
+            :conversations="conversations"
+            :activeChat="activeChat"
+            :loading="loadingHistories"
+            :collapsed="chatHistoryCollapsed"
+            @select-chat="handleSelectChat"
+            @new-chat="handleNewChat"
+            @delete-chat="handleDeleteChat"
+          />
+          <button 
+            @click="toggleChatHistory" 
+            class="absolute top-4 right-0 transform translate-x-1/2 bg-white rounded-full p-1 shadow-md hover:bg-gray-100 z-10"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" :class="{'rotate-180': !chatHistoryCollapsed}" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+            </svg>
+          </button>
+        </div>
 
         <!-- 主聊天区域 -->
         <div class="flex-1 flex flex-col bg-white">
@@ -47,13 +71,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useUserStore } from '@/store/user'
 import { 
   getUserHistories, 
   getHistory, 
-  chat, 
-  chatStream, 
   deleteHistory, 
   summarizeHistoryTitle 
 } from '@/api/modules/llm'
@@ -76,6 +98,19 @@ const streamController = ref(null)
 const lastSummarizedCount = ref(0)
 // 记录当前会话的消息数量
 const currentMessageCount = ref(0)
+
+// 侧边栏折叠状态
+const sideNavCollapsed = ref(false)
+const chatHistoryCollapsed = ref(false)
+
+// 切换侧边栏折叠状态
+const toggleSideNav = () => {
+  sideNavCollapsed.value = !sideNavCollapsed.value
+}
+
+const toggleChatHistory = () => {
+  chatHistoryCollapsed.value = !chatHistoryCollapsed.value
+}
 
 // 终止正在进行的流式请求
 const abortStreamIfActive = () => {
@@ -249,8 +284,8 @@ const handleDeleteChat = async (historyId) => {
   }
 }
 
-// 使用流式请求发送消息
-const handleSendMessage = async (content) => {
+// 处理发送消息，支持文本和语音输入
+const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
   // 终止正在进行的流请求
   abortStreamIfActive()
   
@@ -260,150 +295,244 @@ const handleSendMessage = async (content) => {
   // 添加用户消息 - 使用与API一致的格式
   const userMessage = {
     sender: { role: 'user' },
-    components: [{ type: 'text', content }],
-    message_str: content,
-    timestamp: Date.now()
+    components: [{ 
+      type: audioBlob ? 'audio' : 'text', 
+      content: audioBlob ? '语音输入...' : content 
+    }],
+    message_str: audioBlob ? '语音输入...' : content,
+    timestamp: Date.now(),
+    isAudioInput: !!audioBlob
   }
   currentMessages.value.push(userMessage)
 
-  // 添加一个空的AI回复占位符，用于流式填充
+  // 添加一个AI回复占位符
   const aiMessage = {
     sender: { 
       role: 'assistant',
       nickname: selectedModel.value
     },
-    streamContent: '',
     timestamp: Date.now(),
-    isStreaming: true
+    isStreaming: true,  // 始终使用流式输出，除非是TTS模式
+    streamContent: ''
   }
+  
+  // 如果是TTS模式，则不使用流式输出
+  if (useTts) {
+    aiMessage.isStreaming = false
+  }
+  
   currentMessages.value.push(aiMessage)
   isStreamingResponse.value = true
 
   try {
-    // 创建一个新的AbortController
+    // 构建API请求URL和参数
+    const baseApi = import.meta.env.VITE_BASE_API
+    const cleanBaseApi = baseApi.endsWith('/') ? baseApi.slice(0, -1) : baseApi
+    const url = `${cleanBaseApi}/llm/chat?token=${userStore.token}`
+    
+    // 使用FormData构建请求
+    const formData = new FormData()
+    formData.append('model', selectedModel.value)
+    
+    // 根据输入类型设置参数
+    if (audioBlob) {
+      // 语音输入模式
+      formData.append('message', '')  // 语音模式下消息为空
+      formData.append('stream', 'true')  // 保持流式输出
+      formData.append('stt', 'true')   // 启用语音转文字
+      formData.append('tts', 'false')  // 关闭文字转语音
+      
+      // 添加音频文件
+      formData.append('audio_file', audioBlob, 'recording.wav')
+      
+      console.log('发送录音，参数:', {
+        model: selectedModel.value,
+        history_id: activeChat.value || "",
+        role: 'user',
+        stream: true,
+        stt: true,
+        tts: false,
+        audio_file: '(二进制音频数据)'
+      })
+    } else {
+      // 文本输入模式
+      formData.append('message', content)
+      formData.append('stream', useTts ? 'false' : 'true')  // TTS模式下不使用流式输出
+      formData.append('tts', useTts ? 'true' : 'false')     // 是否启用TTS
+      formData.append('stt', 'false')
+      
+      console.log('发送文本消息，参数:', {
+        model: selectedModel.value,
+        message: content,
+        history_id: activeChat.value || "",
+        role: 'user',
+        stream: !useTts,
+        tts: useTts,
+        stt: false
+      })
+    }
+    
+    // 公共参数
+    formData.append('history_id', activeChat.value || "")
+    formData.append('role', 'user')
+    
+    // 创建请求控制器
     streamController.value = new AbortController()
     
-    // 构建API请求URL和参数 - 确保不会有重复的斜杠
-    const baseApi = import.meta.env.VITE_BASE_API || 'http://127.0.0.1:8000'
-    const cleanBaseApi = baseApi.endsWith('/') ? baseApi.slice(0, -1) : baseApi
-    const url = `${cleanBaseApi}/llm/chat/stream?token=${userStore.token}`
-    
-    console.log('流式请求URL:', url)
-    
-    const headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream'
-    }
-    const body = JSON.stringify({
-      model: selectedModel.value,
-      message: content,
-      history_id: activeChat.value || "",
-      role: 'user'
-    })
-    
-    console.log('流式请求参数:', body)
-    
-    // 发起流式请求
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: headers,
-      body: body,
-      signal: streamController.value.signal
-    })
-    
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`请求失败: ${response.status} - ${errorText}`)
-      console.error('响应头:', Object.fromEntries([...response.headers]))
-      throw new Error(`请求失败: ${response.status} - ${errorText}`)
-    }
-    
-    // 处理SSE响应
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-    
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
+    if (useTts) {
+      // TTS模式: 非流式请求，获取完整响应
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+        signal: streamController.value.signal
+      })
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`请求失败: ${response.status} - ${errorText}`)
+      }
+      
+      // 解析完整响应
+      const result = await response.json()
+      console.log('TTS响应:', result)
+      
+      // 处理带音频的响应
+      if (result && result.response_message) {
+        const responseMsg = result.response_message
         
-        if (done) {
-          console.log('流式请求完成')
-          break
+        // 更新AI消息
+        aiMessage.message_str = responseMsg.message_str || ''
+        aiMessage.components = responseMsg.components || []
+        aiMessage.isStreaming = false
+        
+        // 处理音频组件
+        const audioComponent = responseMsg.components?.find(c => c.type === 'audio')
+        if (audioComponent && audioComponent.content) {
+          // 添加音频URL，拼接baseApi
+          aiMessage.audioUrl = `${cleanBaseApi}${audioComponent.content}`
+          aiMessage.hasAudio = true
         }
         
-        // 解码二进制数据
-        const chunk = decoder.decode(value, { stream: true })
-        
-        // 将新块添加到缓冲区并按行分割
-        buffer += chunk
-        const lines = buffer.split('\n')
-        
-        // 处理除最后一行外的所有行（最后一行可能不完整）
-        buffer = lines.pop() || ''
-        
-        for (const line of lines) {
-          if (!line.trim()) continue
+        // 强制Vue更新视图
+        currentMessages.value = [...currentMessages.value]
+      } else if (result.error) {
+        aiMessage.message_str = `错误: ${result.error}`
+        aiMessage.isError = true
+        currentMessages.value = [...currentMessages.value]
+      }
+    } else {
+      // 标准流式请求 (用于文本输入或语音输入)
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+        signal: streamController.value.signal
+      })
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`请求失败: ${response.status} - ${errorText}`)
+      }
+      
+      // 处理SSE响应
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      let tokenInfo = null
+      let messageId = null
+      let historyId = null
+      let transcription = null
+      
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
           
-          if (line.startsWith('data:')) {
-            const data = line.substring(5).trim()
+          if (done) {
+            console.log('流式请求完成')
+            break
+          }
+          
+          // 解码二进制数据
+          const chunk = decoder.decode(value, { stream: true })
+          
+          // 将新块添加到缓冲区并按行分割
+          buffer += chunk
+          const lines = buffer.split('\n')
+          
+          // 处理除最后一行外的所有行
+          buffer = lines.pop() || ''
+          
+          for (const line of lines) {
+            if (!line.trim()) continue
             
-            if (data === '[DONE]') {
-              continue
-            }
-            
-            try {
-              const parsed = JSON.parse(data)
+            if (line.startsWith('data:')) {
+              const data = line.substring(5).trim()
               
-              if (parsed.text) {
-                // 更新流式内容
-                aiMessage.streamContent = (aiMessage.streamContent || '') + parsed.text
-                
-                // 强制Vue更新视图
-                currentMessages.value = [...currentMessages.value]
-              } else if (parsed.error) {
-                aiMessage.streamContent = `错误: ${parsed.error}`
-                aiMessage.isError = true
-                currentMessages.value = [...currentMessages.value]
-              } else if (parsed.token_info) {
-                // 保存token统计信息
-                tokenInfo = {
-                  input: parsed.token_info.input_tokens,
-                  output: parsed.token_info.output_tokens
-                }
-                messageId = parsed.token_info.message_id
-                if (parsed.token_info.history_id) {
-                  historyId = parsed.token_info.history_id
-                }
+              if (data === '[DONE]') {
+                continue
               }
-            } catch (e) {
-              console.error("解析数据失败:", e, data)
+              
+              try {
+                const parsed = JSON.parse(data)
+                
+                if (parsed.text) {
+                  // 更新流式内容
+                  aiMessage.streamContent = (aiMessage.streamContent || '') + parsed.text
+                  
+                  // 强制Vue更新视图
+                  currentMessages.value = [...currentMessages.value]
+                } else if (parsed.error) {
+                  aiMessage.streamContent = `错误: ${parsed.error}`
+                  aiMessage.isError = true
+                  currentMessages.value = [...currentMessages.value]
+                } else if (parsed.token_info) {
+                  // 保存token统计信息
+                  tokenInfo = {
+                    input: parsed.token_info.input_tokens,
+                    output: parsed.token_info.output_tokens
+                  }
+                  messageId = parsed.token_info.message_id
+                  if (parsed.token_info.history_id) {
+                    historyId = parsed.token_info.history_id
+                  }
+                } else if (parsed.transcription && audioBlob) {
+                  // 处理转录结果 - 更新用户消息的内容
+                  transcription = parsed.transcription
+                  const userIndex = currentMessages.value.length - 2
+                  if (userIndex >= 0 && currentMessages.value[userIndex].isAudioInput) {
+                    currentMessages.value[userIndex].message_str = transcription
+                    currentMessages.value = [...currentMessages.value]
+                  }
+                }
+              } catch (e) {
+                console.error("解析数据失败:", e, data)
+              }
             }
           }
         }
-      }
-    } catch (error) {
-      if (error.name !== 'AbortError') {
-        throw error
+        
+        // 流式输出完成后，把结果保存到message_str中
+        if (aiMessage.streamContent) {
+          aiMessage.message_str = aiMessage.streamContent
+          aiMessage.isStreaming = false
+          currentMessages.value = [...currentMessages.value]
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          throw error
+        }
       }
     }
     
-    // 流式请求完成后，如果是新会话，则获取最新的会话列表
+    // 更新会话列表
     if (isNewChat) {
       console.log('新会话消息已发送，获取最新会话列表')
-      // 延迟执行，确保后端处理完成
       setTimeout(() => {
         fetchChatHistories(true)
       }, 1000)
     } else {
-      // 如果不是新会话，检查是否需要自动总结标题
-      // 当前消息数量（用户消息+AI回复）
+      // 检查是否需要自动总结标题
       const newMsgCount = currentMessages.value.length
-      
-      // 如果消息数量为偶数（表示一问一答完成）且不超过6条
       if (newMsgCount <= 6 && newMsgCount % 2 === 0 && newMsgCount > lastSummarizedCount.value) {
-        console.log(`消息数为${newMsgCount}，尝试自动总结标题`)
-        // 延迟执行，确保消息已写入数据库
         setTimeout(() => {
           sumTitleIfNeeded(activeChat.value)
         }, 1000)
@@ -412,14 +541,11 @@ const handleSendMessage = async (content) => {
     
   } catch (error) {
     console.error('发送消息失败:', error)
-    console.error('错误类型:', error.name)
-    console.error('错误消息:', error.message)
     
     // 如果是用户中断，不显示错误
     if (error.name !== 'AbortError') {
-      // 将流式消息标记为错误
       aiMessage.isError = true
-      aiMessage.streamContent = '消息发送失败，请重试: ' + error.message
+      aiMessage.message_str = '消息发送失败，请重试: ' + error.message
       currentMessages.value = [...currentMessages.value]
     }
   } finally {

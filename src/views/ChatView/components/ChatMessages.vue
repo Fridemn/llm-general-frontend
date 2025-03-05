@@ -37,6 +37,14 @@
               :isError="isError(message)"
               :isStreaming="isStreaming && index === messages.length - 1 && isAssistant(message)"
             />
+            <div v-if="message.hasAudio">
+              <div v-if="message.audioUrl" class="mt-2">
+                <audio controls class="w-full">
+                  <source :src="message.audioUrl" type="audio/mpeg">
+                  您的浏览器不支持音频播放
+                </audio>
+              </div>
+            </div>
           </div>
         </div>
 
