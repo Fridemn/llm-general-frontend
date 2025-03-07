@@ -103,6 +103,9 @@ const currentMessageCount = ref(0)
 const sideNavCollapsed = ref(false)
 const chatHistoryCollapsed = ref(false)
 
+// 添加音频缓存
+const audioCache = ref(new Map()) // 用于缓存已下载的音频URL
+
 // 切换侧边栏折叠状态
 const toggleSideNav = () => {
   sideNavCollapsed.value = !sideNavCollapsed.value
@@ -127,6 +130,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   abortStreamIfActive()
+  
+  // 清理音频缓存
+  audioCache.value.forEach((blobUrl) => {
+    URL.revokeObjectURL(blobUrl)
+  })
+  audioCache.value.clear()
 })
 
 // 获取聊天历史
@@ -202,27 +211,15 @@ const handleSelectChat = async (chatId) => {
     if (response && response.messages) {
       // 处理消息内容，确保格式一致
       currentMessages.value = response.messages.map(msg => {
-        // 确保每条消息有正确的格式
-        return {
-          ...msg,
-          // 如果message_str为空但components不为空，从components中提取内容
-          message_str: msg.message_str || (msg.components && msg.components.length > 0 
-            ? msg.components.map(comp => comp.content).join('\n') 
-            : ''),
-          // 保存原始components以备用
-          components: msg.components || []
-        }
+        // 提前处理音频组件
+        const processedMsg = processMessageComponents(msg)
+        return processedMsg
       })
     } else if (Array.isArray(response)) {
       // 如果直接返回了消息数组
       currentMessages.value = response.map(msg => {
-        return {
-          ...msg,
-          message_str: msg.message_str || (msg.components && msg.components.length > 0 
-            ? msg.components.map(comp => comp.content).join('\n') 
-            : ''),
-          components: msg.components || []
-        }
+        // 提前处理音频组件
+        return processMessageComponents(msg)
       })
     } else {
       console.warn('获取聊天记录返回了意外的数据格式:', response)
@@ -246,6 +243,125 @@ const handleSelectChat = async (chatId) => {
   }
 }
 
+/**
+ * 处理消息组件，解析音频组件并添加到消息对象
+ */
+const processMessageComponents = (msg) => {
+  // 基本消息格式
+  const processedMsg = {
+    ...msg,
+    components: msg.components || [],
+    hasAudio: false,
+    audioUrl: '',
+  }
+  
+  // 如果没有组件，尝试从message_str创建文本组件
+  if (!processedMsg.components.length && processedMsg.message_str) {
+    processedMsg.components = [{ type: 'text', content: processedMsg.message_str }]
+  }
+  
+  // 确保message_str存在
+  if (!processedMsg.message_str) {
+    // 从组件提取文本内容构建message_str
+    const textComponents = processedMsg.components.filter(c => c.type === 'text')
+    if (textComponents.length > 0) {
+      processedMsg.message_str = textComponents.map(c => c.content).join('\n')
+    }
+  }
+  
+  // 处理音频组件
+  const audioComponent = processedMsg.components.find(c => c.type === 'audio')
+  if (audioComponent && audioComponent.content) {
+    const baseApi = import.meta.env.VITE_BASE_API
+    const cleanBaseApi = baseApi.endsWith('/') ? baseApi.slice(0, -1) : baseApi
+    
+    // 设置音频URL和标记
+    processedMsg.hasAudio = true
+    processedMsg.audioUrl = `${cleanBaseApi}${audioComponent.content}`
+    
+    // 打印调试信息，看看音频路径是否正确
+    console.log(`处理音频组件: ${processedMsg.sender?.role}, URL: ${processedMsg.audioUrl}`)
+    
+    // 如果组件有额外信息，保存下来
+    if (audioComponent.extra) {
+      processedMsg.audioExtra = audioComponent.extra
+      
+      // 检查音频extra字段中的transcript
+      if (audioComponent.extra.transcript && !processedMsg.message_str) {
+        processedMsg.message_str = audioComponent.extra.transcript
+      }
+      
+      // 用于调试
+      console.log('音频组件额外信息:', audioComponent.extra)
+    }
+    
+    // 检查音频缓存
+    if (audioCache.value.has(processedMsg.audioUrl)) {
+      processedMsg.audioBlobUrl = audioCache.value.get(processedMsg.audioUrl)
+      console.log('从缓存加载音频:', processedMsg.audioUrl)
+    } else {
+      // 异步加载音频
+      loadAudioAndCache(processedMsg)
+    }
+  }
+  
+  return processedMsg
+}
+
+/**
+ * 加载音频并缓存
+ */
+const loadAudioAndCache = async (message) => {
+  if (!message.audioUrl) return
+  
+  try {
+    console.log('开始加载音频:', message.audioUrl)
+    
+    // 打印更多调试信息
+    console.log('音频所属消息:', {
+      role: message.sender?.role,
+      components: message.components,
+      hasAudio: message.hasAudio
+    })
+    
+    const response = await fetch(message.audioUrl)
+    
+    if (!response.ok) {
+      console.error('音频加载失败:', response.status, response.statusText)
+      return
+    }
+    
+    // 检查内容类型
+    const contentType = response.headers.get('content-type')
+    console.log('音频内容类型:', contentType)
+    
+    const blob = await response.blob()
+    
+    // 根据实际内容类型创建正确的blob
+    const audioType = contentType || 
+                      (message.audioUrl.endsWith('.mp3') ? 'audio/mpeg' : 
+                      (message.audioUrl.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg'))
+    
+    const typedBlob = new Blob([blob], { type: audioType })
+    const blobUrl = URL.createObjectURL(typedBlob)
+    
+    // 存入缓存
+    audioCache.value.set(message.audioUrl, blobUrl)
+    
+    // 更新消息对象
+    message.audioBlobUrl = blobUrl
+    message.audioType = audioType
+    
+    // 强制视图更新
+    currentMessages.value = [...currentMessages.value]
+    
+    console.log('音频加载并缓存成功:', message.audioUrl, '-> Blob URL:', blobUrl)
+  } catch (error) {
+    console.error('加载音频文件失败:', error, message.audioUrl)
+  }
+}
+
+// 处理新聊天
 const handleNewChat = () => {
   activeChat.value = null
   currentMessages.value = []
@@ -285,7 +401,7 @@ const handleDeleteChat = async (historyId) => {
 }
 
 // 处理发送消息，支持文本和语音输入
-const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
+const handleSendMessage = async (content, useTts = false, audioBlob = null, useStt = false) => {
   // 终止正在进行的流请求
   abortStreamIfActive()
   
@@ -303,6 +419,21 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
     timestamp: Date.now(),
     isAudioInput: !!audioBlob
   }
+  
+  // 如果是音频消息，生成本地预览URL
+  if (audioBlob) {
+    userMessage.audioBlobUrl = URL.createObjectURL(audioBlob)
+    userMessage.hasAudio = true
+    userMessage.audioType = 'audio/wav' // 明确指定类型为wav
+    
+    // 将Blob URL添加到缓存，以便后续使用
+    if (!audioCache.value.has(userMessage.audioBlobUrl)) {
+      audioCache.value.set(userMessage.audioBlobUrl, userMessage.audioBlobUrl)
+    }
+    
+    console.log('已创建用户音频预览URL:', userMessage.audioBlobUrl)
+  }
+  
   currentMessages.value.push(userMessage)
 
   // 添加一个AI回复占位符
@@ -311,14 +442,15 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
       role: 'assistant',
       nickname: selectedModel.value
     },
-    timestamp: Date.now(),
-    isStreaming: true,  // 始终使用流式输出，除非是TTS模式
-    streamContent: ''
+    timestamp: Date.now()
   }
   
-  // 如果是TTS模式，则不使用流式输出
-  if (useTts) {
-    aiMessage.isStreaming = false
+  // 根据TTS和STT的组合决定是否使用流式输出
+  const useStream = determineStreamMode(useTts, useStt)
+  aiMessage.isStreaming = useStream
+  
+  if (useStream) {
+    aiMessage.streamContent = ''
   }
   
   currentMessages.value.push(aiMessage)
@@ -338,9 +470,9 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
     if (audioBlob) {
       // 语音输入模式
       formData.append('message', '')  // 语音模式下消息为空
-      formData.append('stream', 'true')  // 保持流式输出
+      formData.append('stream', useStream ? 'true' : 'false')
       formData.append('stt', 'true')   // 启用语音转文字
-      formData.append('tts', 'false')  // 关闭文字转语音
+      formData.append('tts', useTts ? 'true' : 'false')  // 可选择是否启用TTS
       
       // 添加音频文件
       formData.append('audio_file', audioBlob, 'recording.wav')
@@ -349,26 +481,26 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
         model: selectedModel.value,
         history_id: activeChat.value || "",
         role: 'user',
-        stream: true,
+        stream: useStream,
         stt: true,
-        tts: false,
+        tts: useTts,
         audio_file: '(二进制音频数据)'
       })
     } else {
       // 文本输入模式
       formData.append('message', content)
-      formData.append('stream', useTts ? 'false' : 'true')  // TTS模式下不使用流式输出
-      formData.append('tts', useTts ? 'true' : 'false')     // 是否启用TTS
-      formData.append('stt', 'false')
+      formData.append('stream', useStream ? 'true' : 'false')
+      formData.append('tts', useTts ? 'true' : 'false')
+      formData.append('stt', useStt ? 'true' : 'false')
       
       console.log('发送文本消息，参数:', {
         model: selectedModel.value,
         message: content,
         history_id: activeChat.value || "",
         role: 'user',
-        stream: !useTts,
+        stream: useStream,
         tts: useTts,
-        stt: false
+        stt: useStt
       })
     }
     
@@ -379,8 +511,8 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
     // 创建请求控制器
     streamController.value = new AbortController()
     
-    if (useTts) {
-      // TTS模式: 非流式请求，获取完整响应
+    if (!useStream) {
+      // 非流式请求，获取完整响应
       const response = await fetch(url, {
         method: 'POST',
         body: formData,
@@ -389,16 +521,37 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
       
       if (!response.ok) {
         const errorText = await response.text()
+        console.error('请求失败:', response.status, errorText)
         throw new Error(`请求失败: ${response.status} - ${errorText}`)
       }
       
       // 解析完整响应
       const result = await response.json()
-      console.log('TTS响应:', result)
+      console.log('完整响应数据:', result)
+
+      // 如果是STT+TTS模式，需要确保用户的音频消息保持可见和可播放
+      if (useStt && audioBlob && result.response_message) {
+        // 找到用户消息的索引
+        const userMsgIndex = currentMessages.value.length - 2;
+        if (userMsgIndex >= 0 && currentMessages.value[userMsgIndex].isAudioInput) {
+          // 如果有转录结果，更新用户消息的文本
+          if (result.transcription) {
+            currentMessages.value[userMsgIndex].message_str = result.transcription;
+            console.log('更新了用户消息的转录文本:', result.transcription);
+          }
+          
+          // 确保音频组件正确设置
+          currentMessages.value[userMsgIndex].hasAudio = true;
+          
+          // 强制更新视图
+          currentMessages.value = [...currentMessages.value];
+        }
+      }
       
       // 处理带音频的响应
       if (result && result.response_message) {
         const responseMsg = result.response_message
+        console.log('处理响应消息:', responseMsg)
         
         // 更新AI消息
         aiMessage.message_str = responseMsg.message_str || ''
@@ -409,8 +562,23 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
         const audioComponent = responseMsg.components?.find(c => c.type === 'audio')
         if (audioComponent && audioComponent.content) {
           // 添加音频URL，拼接baseApi
-          aiMessage.audioUrl = `${cleanBaseApi}${audioComponent.content}`
+          const audioPath = audioComponent.content
+          aiMessage.audioUrl = `${cleanBaseApi}${audioPath}`
           aiMessage.hasAudio = true
+          console.log('音频URL已设置:', aiMessage.audioUrl)
+          
+          // 加载并缓存音频
+          loadAudioAndCache(aiMessage)
+        }
+        
+        // 如果还有audio_url字段，也处理一下
+        if (result.audio_url) {
+          aiMessage.audioUrl = `${cleanBaseApi}${result.audio_url}`
+          aiMessage.hasAudio = true
+          console.log('从根级audio_url设置音频URL:', aiMessage.audioUrl)
+          
+          // 加载并缓存音频
+          loadAudioAndCache(aiMessage)
         }
         
         // 强制Vue更新视图
@@ -419,9 +587,20 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
         aiMessage.message_str = `错误: ${result.error}`
         aiMessage.isError = true
         currentMessages.value = [...currentMessages.value]
+      } else if (result.audio_url) {
+        // 直接从根级别获取音频URL
+        aiMessage.audioUrl = `${cleanBaseApi}${result.audio_url}`
+        aiMessage.hasAudio = true
+        // 确保有文本内容
+        if (!aiMessage.message_str && result.response_message) {
+          aiMessage.message_str = result.response_message
+        }
+        console.log('从根级别设置音频URL:', aiMessage.audioUrl)
+        // 强制Vue更新视图
+        currentMessages.value = [...currentMessages.value]
       }
     } else {
-      // 标准流式请求 (用于文本输入或语音输入)
+      // 流式请求处理
       const response = await fetch(url, {
         method: 'POST',
         body: formData,
@@ -500,6 +679,10 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
                   const userIndex = currentMessages.value.length - 2
                   if (userIndex >= 0 && currentMessages.value[userIndex].isAudioInput) {
                     currentMessages.value[userIndex].message_str = transcription
+                    
+                    // 确保音频组件正确设置
+                    currentMessages.value[userIndex].hasAudio = true
+                    
                     currentMessages.value = [...currentMessages.value]
                   }
                 }
@@ -552,6 +735,24 @@ const handleSendMessage = async (content, useTts = false, audioBlob = null) => {
     isStreamingResponse.value = false
     streamController.value = null
   }
+}
+
+/**
+ * 根据TTS和STT状态确定是否使用流式输出
+ * 规则：
+ * 1. 当不使用TTS和STT时，stream为true
+ * 2. 当使用TTS，不使用STT时，stream为false
+ * 3. 当使用STT，不使用TTS时，stream为true
+ * 4. 当TTS和STT都使用时，stream为false
+ */
+const determineStreamMode = (useTts, useStt) => {
+  // 当需要TTS时，不使用流式输出
+  if (useTts) {
+    return false  // TTS需要非流式
+  }
+  
+  // 其他情况下使用流式输出
+  return true
 }
 
 // 监听消息数变化，触发标题总结

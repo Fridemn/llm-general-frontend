@@ -31,18 +31,44 @@
             <div class="text-xs text-gray-500 mb-1 ml-1">
               {{ getSenderName(message) }}
             </div>
-            <ChatMessageContent 
-              :content="getMessageContent(message)"
-              :isUser="false"
-              :isError="isError(message)"
-              :isStreaming="isStreaming && index === messages.length - 1 && isAssistant(message)"
-            />
-            <div v-if="message.hasAudio">
-              <div v-if="message.audioUrl" class="mt-2">
-                <audio controls class="w-full">
-                  <source :src="message.audioUrl" type="audio/mpeg">
-                  您的浏览器不支持音频播放
-                </audio>
+            
+            <!-- 错误消息 -->
+            <div v-if="message.isError" class="text-red-500 whitespace-pre-wrap px-3 py-2 bg-red-50 rounded-lg">
+              {{ getMessageContent(message) }}
+            </div>
+            
+            <!-- 流式消息 -->
+            <div v-else-if="message.isStreaming" class="whitespace-pre-wrap px-3 py-2 bg-gray-50 rounded-lg">
+              {{ message.streamContent }}<span class="animate-pulse">▌</span>
+            </div>
+            
+            <!-- 正常文本消息 -->
+            <div v-else class="whitespace-pre-wrap px-3 py-2 bg-gray-50 rounded-lg">
+              {{ getMessageContent(message) }}
+            </div>
+            
+            <!-- 音频消息 - 优先使用缓存的blob URL -->
+            <div v-if="message.hasAudio" class="mt-2 px-3">
+              <audio 
+                controls 
+                class="w-full" 
+                :key="Date.now() + (message.audioBlobUrl || message.audioUrl)"
+                @error="handleAudioError($event, message)"
+              >
+                <source 
+                  :src="message.audioBlobUrl || message.audioUrl" 
+                  :type="message.audioType || getAudioType(message.audioUrl)"
+                >
+                您的浏览器不支持音频播放
+              </audio>
+              <div v-if="!message.audioBlobUrl && message.audioUrl" class="text-xs text-gray-400 mt-1">
+                加载音频中...
+              </div>
+              <div v-if="message.audioError" class="text-xs text-red-500 mt-1">
+                {{ message.audioError }}
+              </div>
+              <div v-if="debug" class="text-xs text-gray-400 mt-1">
+                Debug: {{ message.audioBlobUrl || message.audioUrl }} ({{ message.audioType || getAudioType(message.audioUrl) }})
               </div>
             </div>
           </div>
@@ -59,12 +85,34 @@
             <div class="text-xs text-gray-500 mb-1 mr-1">
               {{ getSenderName(message) }}
             </div>
-            <ChatMessageContent 
-              :content="getMessageContent(message)"
-              :isUser="true"
-              :isError="isError(message)"
-              :isStreaming="false"
-            />
+            <div class="whitespace-pre-wrap px-3 py-2 bg-blue-50 rounded-lg">
+              {{ getMessageContent(message) }}
+            </div>
+            
+            <!-- 用户音频消息 -->
+            <div v-if="message.hasAudio" class="mt-2 px-3 w-full">
+              <audio 
+                controls 
+                class="w-full"
+                :key="Date.now() + (message.audioBlobUrl || message.audioUrl)"
+                @error="handleAudioError($event, message)"
+              >
+                <source 
+                  :src="message.audioBlobUrl || message.audioUrl" 
+                  :type="message.audioType || getAudioType(message.audioUrl)"
+                >
+                您的浏览器不支持音频播放
+              </audio>
+              <div v-if="!message.audioBlobUrl && message.audioUrl" class="text-xs text-gray-400 mt-1 text-right">
+                加载音频中...
+              </div>
+              <div v-if="message.audioError" class="text-xs text-red-500 mt-1 text-right">
+                {{ message.audioError }}
+              </div>
+              <div v-if="debug" class="text-xs text-gray-400 mt-1">
+                Debug: {{ message.audioBlobUrl || message.audioUrl }} ({{ message.audioType || getAudioType(message.audioUrl) }})
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -119,11 +167,45 @@ watch(() => props.messages, async () => {
 }, { deep: true });
 
 
+// 根据URL获取适当的音频MIME类型
+const getAudioType = (url) => {
+  if (!url) return 'audio/mpeg';
+  if (url.endsWith('.mp3')) return 'audio/mpeg';
+  if (url.endsWith('.wav')) return 'audio/wav';
+  if (url.endsWith('.ogg')) return 'audio/ogg';
+  return 'audio/mpeg'; // 默认类型
+};
+
+// 处理音频加载错误
+const handleAudioError = (event, message) => {
+  console.error('音频加载失败:', event, message);
+  message.audioError = '音频加载失败，请刷新重试';
+};
+
+// 添加调试模式
+const debug = ref(false); // 可以设置为true以显示调试信息
+
 // 将消息格式化为一致的结构
 const formattedMessages = computed(() => {
   return props.messages.map(msg => {
     // 如果已经是标准格式但可能缺少某些字段，补全它们
     if (msg.sender) {
+      // 检查是否有音频URL或blob URL
+      const hasAudio = !!msg.audioUrl || !!msg.hasAudio || !!msg.audioBlobUrl;
+      
+      // 确定音频类型
+      let audioType = msg.audioType;
+      if (!audioType) {
+        if (msg.audioBlobUrl) {
+          audioType = 'audio/wav'; // 录音通常是WAV格式
+        } else if (msg.audioUrl) {
+          audioType = getAudioType(msg.audioUrl);
+        }
+      }
+      
+      // 检查是否是录音类型的消息
+      const isAudioInput = !!msg.isAudioInput;
+      
       return {
         ...msg,
         message_id: msg.message_id || msg.id || Date.now().toString(),
@@ -133,9 +215,15 @@ const formattedMessages = computed(() => {
         }],
         message_str: msg.message_str || msg.streamContent || 
                     (msg.components && msg.components.length > 0 
-                      ? msg.components.map(comp => comp.content).join('\n') 
+                      ? msg.components.filter(c => c.type === 'text').map(comp => comp.content).join('\n') 
                       : msg.content || ''),
-        timestamp: msg.timestamp || Date.now()
+        timestamp: msg.timestamp || Date.now(),
+        // 确保音频属性被正确传递
+        hasAudio: hasAudio,
+        audioUrl: msg.audioUrl || '',
+        audioBlobUrl: msg.audioBlobUrl || '',
+        audioType: audioType,
+        isAudioInput: isAudioInput
       };
     }
     
@@ -159,6 +247,23 @@ const formattedMessages = computed(() => {
     };
   });
 });
+
+// 添加对音频元素的处理
+watch(() => props.messages, async (newMessages) => {
+  await nextTick();
+  
+  // 尝试为所有有音频但没有设置audioType的消息设置正确的类型
+  newMessages.forEach(msg => {
+    if ((msg.audioUrl || msg.audioBlobUrl) && !msg.audioType) {
+      if (msg.audioBlobUrl) {
+        msg.audioType = 'audio/wav'; // 本地录音通常是WAV格式
+      } else if (msg.audioUrl) {
+        msg.audioType = getAudioType(msg.audioUrl);
+      }
+    }
+  });
+  
+}, { deep: true });
 
 // 获取消息内容的函数，优先级：streamContent > message_str > components > content
 const getMessageContent = (message) => {

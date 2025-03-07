@@ -10,12 +10,12 @@
         :disabled="disabled || isRecording"
       ></textarea>
       <div class="flex ml-2">
-        <!-- 录音按钮 -->
+        <!-- 录音按钮 (STT功能) -->
         <button
           @click="toggleRecording"
           class="mr-2 p-2 rounded-lg flex items-center justify-center"
-          :class="isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-200 text-gray-600'"
-          title="录制语音"
+          :class="isRecording ? 'bg-red-500 text-white animate-pulse' : (isSttEnabled ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600')"
+          title="语音输入 (STT)"
           :disabled="disabled"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -28,8 +28,8 @@
           @click="toggleTts"
           class="mr-2 p-2 rounded-lg flex items-center justify-center"
           :class="isTtsEnabled ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-600'"
-          title="文本转语音"
-          :disabled="disabled || isRecording || hasRecordedAudio"
+          title="文本转语音 (TTS)"
+          :disabled="disabled || isRecording"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414z" clip-rule="evenodd" />
@@ -68,6 +68,22 @@
         </button>
       </div>
     </div>
+    
+    <!-- 语音功能状态提示 -->
+    <div v-if="isTtsEnabled || isSttEnabled" class="px-3 pb-2 text-sm text-gray-500 flex items-center">
+      <span v-if="isTtsEnabled && isSttEnabled">
+        <span class="inline-block w-2 h-2 bg-purple-500 rounded-full mr-1"></span>
+        TTS + STT 模式已启用
+      </span>
+      <span v-else-if="isTtsEnabled">
+        <span class="inline-block w-2 h-2 bg-blue-500 rounded-full mr-1"></span>
+        TTS 模式已启用
+      </span>
+      <span v-else-if="isSttEnabled">
+        <span class="inline-block w-2 h-2 bg-green-500 rounded-full mr-1"></span>
+        STT 模式已启用
+      </span>
+    </div>
   </div>
 </template>
 
@@ -85,6 +101,7 @@ const emit = defineEmits(['send-message'])
 
 const message = ref('')
 const isTtsEnabled = ref(false)
+const isSttEnabled = ref(false)
 const isRecording = ref(false)
 const hasRecordedAudio = ref(false)
 const recordingTime = ref(0)
@@ -97,9 +114,12 @@ const audioElement = ref(null)
 
 // 切换TTS功能
 const toggleTts = () => {
-  // 如果有录音，则不允许开启TTS
-  if (hasRecordedAudio.value) return
+  // 录音中不允许操作
+  if (isRecording.value) return
+  
+  // 切换TTS状态
   isTtsEnabled.value = !isTtsEnabled.value
+  console.log('TTS功能已' + (isTtsEnabled.value ? '启用' : '禁用'))
 }
 
 // 切换录音状态
@@ -116,6 +136,9 @@ const startRecording = async () => {
   try {
     // 清除之前的录音
     clearRecording()
+    
+    // 启用STT模式
+    isSttEnabled.value = true
     
     // 请求用户授权使用麦克风
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -210,19 +233,29 @@ const clearRecording = () => {
   if (audioElement.value) {
     audioElement.value.src = ''
   }
+  
+  // 如果没有正在录音，则也关闭STT模式
+  if (!isRecording.value) {
+    isSttEnabled.value = false
+  }
 }
 
 // 发送消息
 const sendMessage = () => {
   if (props.disabled) return
   
+  // 获取当前的TTS和STT状态
+  const useTts = isTtsEnabled.value
+  const useStt = isSttEnabled.value
+  
   if (hasRecordedAudio.value && audioBlob.value) {
-    // 发送录音
-    emit('send-message', '', false, audioBlob.value)
+    // 发送录音 - 强制使用STT
+    emit('send-message', '', useTts, audioBlob.value, true)
     clearRecording()
   } else if (message.value.trim()) {
     // 发送文本消息
-    emit('send-message', message.value.trim(), isTtsEnabled.value)
+    console.log('发送消息:', message.value.trim(), '使用TTS:', useTts, '使用STT:', useStt)
+    emit('send-message', message.value.trim(), useTts, null, useStt)
     message.value = ''
   }
 }
