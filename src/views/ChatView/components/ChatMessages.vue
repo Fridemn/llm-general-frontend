@@ -27,7 +27,7 @@
             <span v-if="isAssistant(message)" class="material-icons text-sm text-indigo-600">AI</span>
             <span v-else class="material-icons text-sm text-gray-500">info</span>
           </div>
-          <div>
+          <div class="relative"> <!-- 添加relative定位以支持绝对定位的播放按钮 -->
             <div class="text-xs text-gray-500 mb-1 ml-1">
               {{ getSenderName(message) }}
             </div>
@@ -45,6 +45,18 @@
             <!-- 正常文本消息 -->
             <div v-else class="whitespace-pre-wrap px-3 py-2 bg-gray-50 rounded-lg">
               {{ getMessageContent(message) }}
+              
+              <!-- 音频播放图标按钮 - 在消息旁边 -->
+              <button 
+                v-if="message.hasAudio || message.audioUrl || message.audioBlobUrl"
+                @click="$emit('play-audio', message)"
+                class="live2d-play-btn"
+                title="用数字人播放"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              </button>
             </div>
             
             <!-- 音频消息 - 优先使用缓存的blob URL -->
@@ -85,8 +97,20 @@
             <div class="text-xs text-gray-500 mb-1 mr-1">
               {{ getSenderName(message) }}
             </div>
-            <div class="whitespace-pre-wrap px-3 py-2 bg-blue-50 rounded-lg">
+            <div class="whitespace-pre-wrap px-3 py-2 bg-blue-50 rounded-lg relative">
               {{ getMessageContent(message) }}
+              
+              <!-- 用户消息的音频播放图标按钮 -->
+              <button 
+                v-if="message.hasAudio || message.audioUrl || message.audioBlobUrl"
+                @click="$emit('play-audio', message)"
+                class="live2d-play-btn live2d-play-btn-user"
+                title="用数字人播放"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              </button>
             </div>
             
             <!-- 用户音频消息 -->
@@ -311,6 +335,8 @@ const getSenderName = (message) => {
   }
   return '系统消息';
 };
+
+defineEmits(['play-audio'])
 </script>
 
 <style scoped>
@@ -340,5 +366,43 @@ const getSenderName = (message) => {
 
 .typing-indicator-container {
   height: 24px;
+}
+
+/* 数字人播放按钮样式 */
+.live2d-play-btn {
+  position: absolute;
+  right: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background-color: #4f46e5;
+  color: white;
+  border: 2px solid white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  opacity: 0.8;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.live2d-play-btn:hover {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.1);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+}
+
+.live2d-play-btn-user {
+  right: auto;
+  left: -8px;
+}
+
+/* 播放图标内部样式 */
+.live2d-play-btn svg {
+  width: 14px;
+  height: 14px;
 }
 </style>

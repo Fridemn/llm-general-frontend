@@ -55,6 +55,7 @@
               :messages="currentMessages"
               :loading="loadingMessages"
               :isStreaming="isStreamingResponse"
+              @play-audio="handleAudioPlay"
             />
           </div>
 
@@ -71,7 +72,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, inject } from 'vue'
 import { useUserStore } from '@/store/user'
 import { 
   getUserHistories, 
@@ -105,6 +106,9 @@ const chatHistoryCollapsed = ref(false)
 
 // 添加音频缓存
 const audioCache = ref(new Map()) // 用于缓存已下载的音频URL
+
+// 获取Live2D控制接口
+const live2dControls = inject('live2dControls')
 
 // 切换侧边栏折叠状态
 const toggleSideNav = () => {
@@ -358,6 +362,63 @@ const loadAudioAndCache = async (message) => {
     console.log('音频加载并缓存成功:', message.audioUrl, '-> Blob URL:', blobUrl)
   } catch (error) {
     console.error('加载音频文件失败:', error, message.audioUrl)
+  }
+}
+
+// 播放音频并同步Live2D口型变化 - 修复函数
+const playAudioWithLive2D = (audioUrl) => {
+  console.log('播放音频并同步Live2D口型:', audioUrl);
+  
+  // 如果Live2D控制接口可用且Live2D模型可见
+  if (live2dControls && live2dControls.isVisible.value) {
+    try {
+      // 通知Live2D开始说话（传递音频URL）
+      live2dControls.speak(audioUrl);
+      
+      // 无需创建额外的Audio元素，Live2dView组件内部会处理播放
+      console.log('已通知Live2D组件播放音频');
+    } catch (error) {
+      console.error('通知Live2D组件播放音频失败:', error);
+      // 如果Live2D组件处理失败，回退到普通播放
+      const audio = new Audio(audioUrl);
+      audio.play().catch(e => console.error('直接播放音频失败:', e));
+    }
+  } else {
+    // 如果Live2D不可见，直接播放音频
+    console.log('Live2D不可见，直接播放音频');
+    const audio = new Audio(audioUrl);
+    audio.play().catch(error => console.error('播放音频失败:', error));
+  }
+}
+
+// 修改ChatMessages组件中的音频播放处理
+const handleAudioPlay = (message) => {
+  console.log('处理音频播放:', message);
+  
+  if (message && message.audioBlobUrl) {
+    console.log('使用audioBlobUrl播放:', message.audioBlobUrl);
+    playAudioWithLive2D(message.audioBlobUrl);
+  } else if (message && message.audioUrl) {
+    console.log('尝试使用audioUrl播放:', message.audioUrl);
+    // 先检查是否需要下载音频
+    if (!audioCache.value.has(message.audioUrl)) {
+      console.log('音频未缓存，先加载再播放');
+      loadAudioAndCache(message).then(() => {
+        if (message.audioBlobUrl) {
+          console.log('音频已加载，现在播放:', message.audioBlobUrl);
+          playAudioWithLive2D(message.audioBlobUrl);
+        } else {
+          console.warn('音频加载后但未找到audioBlobUrl');
+        }
+      }).catch(error => {
+        console.error('加载音频时出错:', error);
+      });
+    } else {
+      console.log('使用缓存的音频播放');
+      playAudioWithLive2D(audioCache.value.get(message.audioUrl));
+    }
+  } else {
+    console.warn('消息没有可播放的音频');
   }
 }
 
