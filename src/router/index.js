@@ -3,7 +3,7 @@ import HomeView from '@/views/HomeView.vue'
 import LoginOrRegister from '@/views/LoginOrRegister/index.vue'
 import Chat from '@/views/ChatView/index.vue'
 import test from '@/views/testView.vue'
-import Live2dView from '@/views/Live2dView.vue'
+import Live2dView from '@/views/Live2dView/index.vue'
 import { useUserStore } from '@/store/user'
 
 const router = createRouter({

@@ -11,23 +11,19 @@
         v-for="(message, index) in formattedMessages" 
         :key="message.message_id || index"
         class="message-container"
-        :class="{
-          'justify-end': isUser(message)
-        }"
+        :class="{ 'justify-end': isUser(message) }"
         ref="messageElements"
       >
         <!-- AI消息 左侧 -->
         <div v-if="!isUser(message)" 
           class="message-wrapper flex max-w-[80%]"
-          :class="{
-            'opacity-70': isStreamingResponse && index !== messages.length - 1
-          }"
+          :class="{ 'opacity-70': isStreamingResponse && index !== messages.length - 1 }"
         >
           <div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center mr-2">
             <span v-if="isAssistant(message)" class="material-icons text-sm text-indigo-600">AI</span>
             <span v-else class="material-icons text-sm text-gray-500">info</span>
           </div>
-          <div class="relative"> <!-- 添加relative定位以支持绝对定位的播放按钮 -->
+          <div class="relative">
             <div class="text-xs text-gray-500 mb-1 ml-1">
               {{ getSenderName(message) }}
             </div>
@@ -45,27 +41,20 @@
             <!-- 正常文本消息 -->
             <div v-else class="whitespace-pre-wrap px-3 py-2 bg-gray-50 rounded-lg">
               {{ getMessageContent(message) }}
-              
-              <!-- 音频播放图标按钮 - 在消息旁边 -->
-              <button 
-                v-if="message.hasAudio || message.audioUrl || message.audioBlobUrl"
-                @click="$emit('play-audio', message)"
-                class="live2d-play-btn"
-                title="用数字人播放"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-                  <path d="M8 5v14l11-7z"/>
-                </svg>
-              </button>
             </div>
             
-            <!-- 音频消息 - 优先使用缓存的blob URL -->
+            <!-- AI音频消息 -->
             <div v-if="message.hasAudio" class="mt-2 px-3">
               <audio 
                 controls 
-                class="w-full" 
-                :key="Date.now() + (message.audioBlobUrl || message.audioUrl)"
+                muted
+                :class="['w-full ai-audio', 'hide-mute-button']" 
+                :id="'audio-' + (message.message_id || Date.now())"
+                :key="'audio-key-' + (message.audioBlobUrl || message.audioUrl)"
                 @error="handleAudioError($event, message)"
+                @play="handleAIAudioPlay($event, message)"
+                @pause="handleAIAudioPause($event)"
+                @ended="handleAIAudioEnded($event)"
               >
                 <source 
                   :src="message.audioBlobUrl || message.audioUrl" 
@@ -78,9 +67,6 @@
               </div>
               <div v-if="message.audioError" class="text-xs text-red-500 mt-1">
                 {{ message.audioError }}
-              </div>
-              <div v-if="debug" class="text-xs text-gray-400 mt-1">
-                Debug: {{ message.audioBlobUrl || message.audioUrl }} ({{ message.audioType || getAudioType(message.audioUrl) }})
               </div>
             </div>
           </div>
@@ -99,25 +85,13 @@
             </div>
             <div class="whitespace-pre-wrap px-3 py-2 bg-blue-50 rounded-lg relative">
               {{ getMessageContent(message) }}
-              
-              <!-- 用户消息的音频播放图标按钮 -->
-              <button 
-                v-if="message.hasAudio || message.audioUrl || message.audioBlobUrl"
-                @click="$emit('play-audio', message)"
-                class="live2d-play-btn live2d-play-btn-user"
-                title="用数字人播放"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-                  <path d="M8 5v14l11-7z"/>
-                </svg>
-              </button>
             </div>
             
             <!-- 用户音频消息 -->
             <div v-if="message.hasAudio" class="mt-2 px-3 w-full">
               <audio 
                 controls 
-                class="w-full"
+                class="w-full user-audio"
                 :key="Date.now() + (message.audioBlobUrl || message.audioUrl)"
                 @error="handleAudioError($event, message)"
               >
@@ -133,15 +107,12 @@
               <div v-if="message.audioError" class="text-xs text-red-500 mt-1 text-right">
                 {{ message.audioError }}
               </div>
-              <div v-if="debug" class="text-xs text-gray-400 mt-1">
-                Debug: {{ message.audioBlobUrl || message.audioUrl }} ({{ message.audioType || getAudioType(message.audioUrl) }})
-              </div>
             </div>
           </div>
         </div>
       </div>
       
-      <!-- 打字指示器，仅在流式加载时显示 -->
+      <!-- 打字指示器 -->
       <div v-if="isStreaming && messages.length > 0 && isAssistant(messages[messages.length-1])" 
           class="message-container typing-indicator-container">
       </div>
@@ -170,26 +141,25 @@ const props = defineProps({
 
 const messageElements = ref([]);
 const isStreamingResponse = computed(() => props.isStreaming);
+const emit = defineEmits(['play-audio']);
 
-// 滚动到最新消息
-watch(() => props.messages.length, async () => {
-  await nextTick();
-}, { immediate: true });
-
-// 监听流式消息的变化，确保滚动到底部
-watch(() => props.isStreaming, async (newVal) => {
-  if (newVal) {
-    await nextTick();
-  }
-});
-
-// 监听消息内容变化，在流式输出时保持滚动
-watch(() => props.messages, async () => {
-  if (props.isStreaming) {
-    await nextTick();
-  }
+// 监听消息变化和流式响应
+watch(() => props.messages.length, async () => await nextTick(), { immediate: true });
+watch(() => props.isStreaming, async (newVal) => { if (newVal) await nextTick(); });
+watch(() => props.messages, async () => { 
+  if (props.isStreaming) await nextTick();
+  
+  // 为所有音频消息设置正确的类型
+  props.messages.forEach(msg => {
+    if ((msg.audioUrl || msg.audioBlobUrl) && !msg.audioType) {
+      if (msg.audioBlobUrl) {
+        msg.audioType = 'audio/wav';
+      } else if (msg.audioUrl) {
+        msg.audioType = getAudioType(msg.audioUrl);
+      }
+    }
+  });
 }, { deep: true });
-
 
 // 根据URL获取适当的音频MIME类型
 const getAudioType = (url) => {
@@ -197,7 +167,7 @@ const getAudioType = (url) => {
   if (url.endsWith('.mp3')) return 'audio/mpeg';
   if (url.endsWith('.wav')) return 'audio/wav';
   if (url.endsWith('.ogg')) return 'audio/ogg';
-  return 'audio/mpeg'; // 默认类型
+  return 'audio/mpeg';
 };
 
 // 处理音频加载错误
@@ -206,29 +176,22 @@ const handleAudioError = (event, message) => {
   message.audioError = '音频加载失败，请刷新重试';
 };
 
-// 添加调试模式
-const debug = ref(false); // 可以设置为true以显示调试信息
-
 // 将消息格式化为一致的结构
 const formattedMessages = computed(() => {
   return props.messages.map(msg => {
-    // 如果已经是标准格式但可能缺少某些字段，补全它们
+    // 已是标准格式但可能缺少某些字段的消息
     if (msg.sender) {
-      // 检查是否有音频URL或blob URL
       const hasAudio = !!msg.audioUrl || !!msg.hasAudio || !!msg.audioBlobUrl;
       
       // 确定音频类型
       let audioType = msg.audioType;
       if (!audioType) {
         if (msg.audioBlobUrl) {
-          audioType = 'audio/wav'; // 录音通常是WAV格式
+          audioType = 'audio/wav';
         } else if (msg.audioUrl) {
           audioType = getAudioType(msg.audioUrl);
         }
       }
-      
-      // 检查是否是录音类型的消息
-      const isAudioInput = !!msg.isAudioInput;
       
       return {
         ...msg,
@@ -242,12 +205,12 @@ const formattedMessages = computed(() => {
                       ? msg.components.filter(c => c.type === 'text').map(comp => comp.content).join('\n') 
                       : msg.content || ''),
         timestamp: msg.timestamp || Date.now(),
-        // 确保音频属性被正确传递
+        // 音频属性
         hasAudio: hasAudio,
         audioUrl: msg.audioUrl || '',
         audioBlobUrl: msg.audioBlobUrl || '',
         audioType: audioType,
-        isAudioInput: isAudioInput
+        isAudioInput: !!msg.isAudioInput
       };
     }
     
@@ -258,12 +221,7 @@ const formattedMessages = computed(() => {
         role: msg.role || 'user',
         nickname: msg.nickname
       },
-      components: [
-        {
-          type: 'text',
-          content: msg.content || msg.streamContent || ''
-        }
-      ],
+      components: [{ type: 'text', content: msg.content || msg.streamContent || '' }],
       message_str: msg.content || msg.streamContent || '',
       timestamp: msg.timestamp || Date.now(),
       isError: msg.isError,
@@ -272,71 +230,55 @@ const formattedMessages = computed(() => {
   });
 });
 
-// 添加对音频元素的处理
-watch(() => props.messages, async (newMessages) => {
-  await nextTick();
-  
-  // 尝试为所有有音频但没有设置audioType的消息设置正确的类型
-  newMessages.forEach(msg => {
-    if ((msg.audioUrl || msg.audioBlobUrl) && !msg.audioType) {
-      if (msg.audioBlobUrl) {
-        msg.audioType = 'audio/wav'; // 本地录音通常是WAV格式
-      } else if (msg.audioUrl) {
-        msg.audioType = getAudioType(msg.audioUrl);
-      }
-    }
-  });
-  
-}, { deep: true });
-
-// 获取消息内容的函数，优先级：streamContent > message_str > components > content
+// 获取消息内容
 const getMessageContent = (message) => {
-  // 优先使用流式内容
   if (message.streamContent !== undefined && message.streamContent !== null) {
     return message.streamContent;
   }
-  
-  // 其次使用message_str
   if (message.message_str) {
     return message.message_str;
   }
-  
-  // 再次尝试从components中提取
   if (message.components && message.components.length > 0) {
     return message.components.map(comp => comp.content).join('\n');
   }
-  
-  // 最后尝试使用content属性
   return message.content || '';
 };
 
-const isUser = (message) => {
-  return message.sender?.role === 'user';
-};
+// 消息类型判断
+const isUser = (message) => message.sender?.role === 'user';
+const isAssistant = (message) => message.sender?.role === 'assistant';
+const isSystem = (message) => message.sender?.role === 'system';
+const isError = (message) => message.isError === true;
 
-const isAssistant = (message) => {
-  return message.sender?.role === 'assistant';
-};
-
-const isSystem = (message) => {
-  return message.sender?.role === 'system';
-};
-
-const isError = (message) => {
-  return message.isError === true;
-};
-
+// 获取发送者名称
 const getSenderName = (message) => {
-  if (isUser(message)) {
-    return message.sender.nickname || '你';
-  }
-  if (isAssistant(message)) {
-    return message.sender.nickname || 'AI助手';
-  }
+  if (isUser(message)) return message.sender.nickname || '你';
+  if (isAssistant(message)) return message.sender.nickname || 'AI助手';
   return '系统消息';
 };
 
-defineEmits(['play-audio'])
+// 音频事件处理
+const handleAIAudioPlay = (event, message) => {
+  if (!event.target.id) {
+    event.target.id = 'audio-' + (message.message_id || Date.now());
+  }
+  
+  window.dispatchEvent(new CustomEvent('ai-audio-play', { 
+    detail: { 
+      audioUrl: message.audioBlobUrl || message.audioUrl,
+      message,
+      sourceElementId: event.target.id
+    } 
+  }));
+};
+
+const handleAIAudioPause = () => {
+  window.dispatchEvent(new Event('ai-audio-pause'));
+};
+
+const handleAIAudioEnded = () => {
+  window.dispatchEvent(new Event('ai-audio-ended'));
+};
 </script>
 
 <style scoped>
@@ -344,6 +286,13 @@ defineEmits(['play-audio'])
   display: flex;
   margin-bottom: 1rem;
   width: 100%;
+}
+
+/* 隐藏静音按钮 */
+.hide-mute-button::-webkit-media-controls-mute-button,
+.hide-mute-button::-webkit-media-controls-volume-slider,
+.hide-mute-button::-webkit-media-controls-volume-control-container {
+  display: none !important;
 }
 
 .message-wrapper {
@@ -368,41 +317,12 @@ defineEmits(['play-audio'])
   height: 24px;
 }
 
-/* 数字人播放按钮样式 */
-.live2d-play-btn {
-  position: absolute;
-  right: -8px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background-color: #4f46e5;
-  color: white;
-  border: 2px solid white;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  opacity: 0.8;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+/* 音频样式 */
+.ai-audio {
+  border-left: 2px solid #4f46e5;
 }
 
-.live2d-play-btn:hover {
-  opacity: 1;
-  transform: translateY(-50%) scale(1.1);
-  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
-}
-
-.live2d-play-btn-user {
-  right: auto;
-  left: -8px;
-}
-
-/* 播放图标内部样式 */
-.live2d-play-btn svg {
-  width: 14px;
-  height: 14px;
+.user-audio {
+  border-left: 2px solid #93c5fd;
 }
 </style>

@@ -1,7 +1,7 @@
 <script setup>
 import { RouterLink, RouterView } from 'vue-router'
 import { ref, provide } from 'vue'
-import Live2dView from '@/views/Live2dView.vue'
+import Live2dView from '@/views/Live2dView/index.vue'
 
 // 控制Live2D显示状态
 const showLive2D = ref(false)
@@ -63,10 +63,7 @@ provide('live2dControls', {
 </template>
 
 <style scoped>
-.app-container {
-  position: relative;
-  min-height: 100vh;
-}
+
 
 .toggle-live2d-button {
   position: fixed;
